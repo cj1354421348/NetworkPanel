@@ -224,7 +224,7 @@
       </span>
     </template>
   </el-dialog>
-  <MarkUI :show="showMark" :loginInfo="loginInfo" />
+  // <MarkUI :show="showMark" :loginInfo="loginInfo" />
   <audio v-if="isMobile && !isIOS && !isMiuiBrowser && runBackground" @canplay="() => { if (isRunning) audioDom.play() }"
     @pause="() => { if (runBackground) isRunning = false }" @play="isRunning = true" controls loop ref="audioDom"
     style="display:none">
@@ -248,9 +248,9 @@ const props = defineProps({
 import { ElMessage } from 'element-plus'
 import nodesJson from "../assets/nodes.json"
 import { Link, Edit, Delete, CircleCheck, Loading, CopyDocument, TrendCharts, Hide, Histogram, Calendar,FullScreen } from '@element-plus/icons-vue'
-import { ref, watch,watchEffect, type Ref, reactive } from 'vue'
+import { ref, watch,watchEffect, type Ref, reactive, nextTick } from 'vue' // 添加 nextTick
 import { toClipboard } from '@soerenmartius/vue3-clipboard'
-import MarkUI from './Mark.vue'
+// import MarkUI from './Mark.vue'
 import FullScreenUI from './FullScreen.vue'
 
 const showMark = ref({ show: false })
@@ -421,7 +421,8 @@ watch(isRunning, async (newState, oldState) => {
     state.recordTime = new Date().getTime() / 1000;
     for (let i = 0; i < threadNum.value; i++)startThread(i)
     tasks.push(setInterval(frameEvent, 16))
-    tasks.push(setInterval(uploadLog, 60000))
+    // 移除 uploadLog 相关的定时任务
+    // tasks.push(setInterval(uploadLog, 60000))
     tasks.push(setInterval(apiSolver, 60000))
     secEvent()
     tasks.push(setInterval(secEvent, 1000))
@@ -430,7 +431,8 @@ watch(isRunning, async (newState, oldState) => {
     tasks.map((i) => console.log(i))
     tasks.map((i) => clearInterval(i))
     tasks = []
-    uploadLog()
+    // 移除 uploadLog 相关的调用
+    // uploadLog()
     audioDom.value?.pause()
     var speed = (state.bytesUsed - state.startUse) / (new Date().getTime() / 1000 - state.startTime)
     setSpeed(speed)
@@ -441,33 +443,34 @@ watch(isRunning, async (newState, oldState) => {
   }
 })
 
-async function uploadLog() {
-  let now = new Date().getTime() / 1000
-  let num = state.bytesUsed - state.logged
-  let time = now - state.lastLogTime
-
-  state.logged = state.bytesUsed
-  state.lastLogTime = now
-  // if (loginInfo.AccessToken) {
-    let resp = await fetch(import.meta.env.VITE_API_URL+"log", {
-      method: "POST",
-      mode: "cors",
-      redirect: "follow",
-      referrerPolicy: "no-referrer",
-      body: JSON.stringify({
-        AccessToken: loginInfo.AccessToken,
-        url: runUrl.value,
-        threadNum: threadNum.value,
-        used: num,
-        time: time
-      })
-    });
-    resp = await resp.json()
-    if (resp.status == -1) {
-      loginInfo.AccessToken = ''
-    }
-  // }
-}
+// 移除或注释掉整个 uploadLog 函数
+// async function uploadLog() {
+//   let now = new Date().getTime() / 1000
+//   let num = state.bytesUsed - state.logged
+//   let time = now - state.lastLogTime
+// 
+//   state.logged = state.bytesUsed
+//   state.lastLogTime = now
+//   // if (loginInfo.AccessToken) {
+//     let resp = await fetch(import.meta.env.VITE_API_URL+"log", {
+//       method: "POST",
+//       mode: "cors",
+//       redirect: "follow",
+//       referrerPolicy: "no-referrer",
+//       body: JSON.stringify({
+//         AccessToken: loginInfo.AccessToken,
+//         url: runUrl.value,
+//         threadNum: threadNum.value,
+//         used: num,
+//         time: time
+//       })
+//     });
+//     resp = await resp.json()
+//     if (resp.status == -1) {
+//       loginInfo.AccessToken = ''
+//     }
+//   // }
+// }
 
 watch(props, async (newState, oldState) => {
   if (!newState.isVisible && runBackground.value && isRunning.value) secEvent()
@@ -488,9 +491,10 @@ watch(runBackground, async (newState, oldState) => {
 
 watch(chartShow, async (newState, oldState) => {
   localStorage.chartShow = newState
-  if (newState) {
-    setTimeout(() => myChart.resize(), 100)
-  }
+  // 移除此处的 resize 调用，因为已在 onMounted 中的 watch 回调处理
+  // if (newState) {
+  //   setTimeout(() => myChart.resize(), 100)
+  // }
 })
 
 watch(runUrl, async (newState, oldState) => {
@@ -742,16 +746,19 @@ var isIOS = /iPhone|Macintosh/i.test(navigator.userAgent)
 const audioDom: Ref<any> = ref(null);
 
 
-import { onMounted, onUnmounted } from 'vue';
+import { onMounted, onUnmounted, nextTick, watch } from 'vue';
 import * as echarts from 'echarts';
 
 const chartContainer = ref(null);
 
-let myChart: EChartsType;
+let myChart: EChartsType | null = null; // 允许为 null
 let updateChart = (n:number) => {};
 let clearChart=()=>{};
 onMounted(() => {
-  myChart = echarts.init(chartContainer.value);
+  // 注意：此时 chartContainer.value 可能因为 v-show="chartShow" 为 false 而宽度为 0
+  // 我们先创建一个空的图表实例占位，或者延迟到 chartShow 为 true 时再初始化
+  // 这里我们选择在 chartShow 变为 true 时再初始化
+  
   const chartOption = {
     tooltip: {
       trigger: 'axis',
@@ -806,48 +813,83 @@ onMounted(() => {
       y2: 10,
       containLabel: true
     },
-  }
+  };
 
-  myChart.setOption(chartOption);
-  let showArray:Array<any>=[]
-  let speedTemp:Array<number>=[]
-  let stepLength=1
+  let showArray:Array<any>=[]; // 使用 let 以便在后续可能重新赋值
+  let speedTemp:Array<number>=[];
+  let stepLength=1;
   clearChart=()=>{
-    // showArray=[]
-    speedTemp=[]
-    showArray.push([new Date().getTime() / 1000,0])
-    // stepLength=1
-  }
+    speedTemp=[];
+    showArray.push([new Date().getTime() / 1000,0]);
+  };
+  
+  // 延迟初始化图表，直到容器可见
+  const initChart = () => {
+    if (myChart) {
+      // 如果已经初始化过，则调整大小
+      myChart.resize();
+    } else if (chartContainer.value) {
+      // 首次初始化
+      myChart = echarts.init(chartContainer.value);
+      myChart.setOption(chartOption);
+    }
+  };
+
   updateChart = (speed:number) => {
-    let refresh=false
-    speedTemp.push(speed)
+    // 确保图表已初始化
+    if (!myChart && chartShow.value && chartContainer.value) {
+      initChart();
+    }
+    
+    let refresh=false;
+    speedTemp.push(speed);
     while(speedTemp.length>=stepLength){
-      refresh=true
+      refresh=true;
       var tmp = speedTemp.splice(0, stepLength);
       let avg;
-      if(tmp.includes(0))avg=0
+      if(tmp.includes(0))avg=0;
       else avg = tmp.reduce((a, b) => a + b,0)/stepLength;
-      showArray.push([new Date().getTime() / 1000,avg])
+      showArray.push([new Date().getTime() / 1000,avg]);
     }
     while(showArray.length>=200){
-      refresh=true
+      refresh=true;
       const result = [];
       const lengthToProcess = showArray.length % 2 === 0 ? showArray.length : showArray.length - 1;
       for (let i = 0; i < lengthToProcess; i += 2) {
         result.push([showArray[i][0],(showArray[i][1] + showArray[i + 1][1]) / 2]);
       }
-      showArray=result
-      stepLength*=2
+      showArray=result;
+      stepLength*=2;
     }
-    chartOption.series[0].data = showArray
-    if(chartShow.value && refresh)myChart.setOption(chartOption);
-  }
-  window.addEventListener('resize', () => { myChart.resize() });
+    // 确保图表已初始化再设置选项
+    if(myChart && chartShow.value && refresh) {
+      chartOption.series[0].data = showArray;
+      myChart.setOption(chartOption);
+    }
+  };
+  
+  // 监听窗口大小变化
+  window.addEventListener('resize', () => { 
+    if (myChart && chartShow.value) {
+       myChart.resize(); 
+    }
+  });
+  
+  // 监听 chartShow 的变化，当变为 true 时初始化或 resize 图表
+  watch(chartShow, (newVal) => {
+    if (newVal && chartContainer.value) {
+      // 使用 nextTick 确保 DOM 已更新
+      nextTick(() => {
+        initChart();
+      });
+    }
+  });
 });
 
 onUnmounted(() => {
   if (myChart) {
     myChart.dispose();
+    myChart = null; // 清空引用
   }
 });
 </script>

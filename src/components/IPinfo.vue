@@ -102,18 +102,15 @@ const copy = (ip: string) => {
     })
 }
 
-// 使用 ipapi.co 免费 IP 查询服务
-// 注意：ipapi.co 对于浏览器直接请求可能有 CORS 限制
-// 尝试使用 JSONP 或代理方式，这里先用 no-cors 模式看是否能获取数据（但会是 opaque response）
 async function queryIp(ip: string) {
     try {
-        // 为了兼容性，我们使用一个支持 CORS 的免费 API
-        // seeip.org 的正确 IP 地理位置查询端点是 /geoip/{IP}
-        // 例如：https://api.seeip.org/geoip/8.8.8.8
-        // // console.log("Trying alternative CORS-enabled API for IP:", ip);
-        const fallbackRsp = await fetch(`https://api.seeip.org/geoip/${ip}`, {
+        // 为了兼容性，我们使用一个免费的 IP 地理位置查询 API
+        // 通过本地代理 '/api/proxy' 请求 seeip.org
+        // 浏览器 -> Vite Server (/api/proxy/seeip-org-geoip/xxx) -> https://api.seeip.org/geoip/xxx
+        // console.log("Using seeip.org geoip API via proxy for IP:", ip);
+        const fallbackRsp = await fetch(`/api/proxy/seeip-org-geoip/${ip}`, {
             method: "GET",
-            mode: "cors", // 明确使用 cors 模式
+            // mode: "cors", // 不再需要, 因为是同源请求
             redirect: "follow",
             referrerPolicy: "no-referrer"
         });
@@ -214,11 +211,11 @@ async function handleIP(ip: string) {
     if (props.isVisible) {
         try {
             // 1. 首先获取本地公网 IP
-            // 使用 api.ipify.org，它是一个广泛支持 CORS 的免费 IP 查询服务
-            // 例如：https://api.ipify.org?format=json
-            const response = await fetch('https://api.ipify.org?format=json', { 
+            // 通过本地代理 '/api/proxy' 请求 ipify.org
+            // 浏览器 -> Vite Server (/api/proxy/ipify-org) -> https://api.ipify.org?format=json
+            const response = await fetch('/api/proxy/ipify-org?format=json', { 
                 method: 'GET',
-                mode: 'cors', // 明确指定 CORS 模式
+                // mode: 'cors', // 不再需要, 因为是同源请求
                 referrerPolicy: 'no-referrer' 
             });
             
@@ -230,7 +227,8 @@ async function handleIP(ip: string) {
             // ipify.org ?format=json 返回 { "ip": "xxx.xxx.xxx.xxx" }
             const localIp = resp.ip;
 
-            // 2. 使用获取到的 IP 调用我们新的 queryIp 函数 (即 seeip.org geoip) 查询详细信息
+            // 2. 使用获取到的 IP 调用我们新的 queryIp 函数
+            // queryIp 内部也会通过代理请求 seeip.org
             if (localIp) {
                 // 注意：这里直接调用 queryIp，避免缓存可能带来的问题
                 const localIpInfo = await queryIp(localIp);
@@ -261,8 +259,8 @@ const watchCloudflare = async(host: string) => {
             let ip_match = resp.match(/ip=([0-9a-f.:]+)/);
             if (ip_match && ip_match[1]) {
                 const cfIp = ip_match[1];
-                // 2. 使用获取到的 IP 调用我们新的 queryIp 函数 (即 seeip.org)
-                // 注意：这里直接调用 queryIp，避免缓存可能带来的问题
+                // 2. 使用获取到的 IP 调用我们新的 queryIp 函数
+                // queryIp 内部也会通过代理请求 seeip.org
                 const cfIpInfo = await queryIp(cfIp); 
                 // 只有在成功获取信息后才更新 reactive 对象
                 if (cfIpInfo && cfIpInfo.ip) {

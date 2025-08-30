@@ -65,7 +65,32 @@ export default defineConfig({
   server: {
     open: true,
     port: 3005,
-    host: '0.0.0.0'
+    host: '0.0.0.0',
+    // 配置代理以绕过 CORS 限制
+    proxy: {
+      // 将 /api/proxy/ipify-org 开头的请求代理到 https://api.ipify.org
+      '/api/proxy/ipify-org': {
+        target: 'https://api.ipify.org',
+        changeOrigin: true,
+        // 重写路径，去掉 /api/proxy/ipify-org 前缀
+        rewrite: (path) => path.replace(/^\/api\/proxy\/ipify-org/, ''),
+        // 确保 Host header 正确
+        headers: {
+          'Host': 'api.ipify.org'
+        }
+      },
+      // 将 /api/proxy/seeip-org-geoip 开头的请求代理到 https://api.seeip.org/geoip
+      '/api/proxy/seeip-org-geoip': {
+        target: 'https://api.seeip.org',
+        changeOrigin: true,
+        // 重写路径，将 /api/proxy/seeip-org-geoip/xxx 替换为 /geoip/xxx
+        rewrite: (path) => path.replace(/^\/api\/proxy\/seeip-org-geoip/, '/geoip'),
+        // 确保 Host header 正确
+        headers: {
+          'Host': 'api.seeip.org'
+        }
+      }
+    }
   },
   base: './'
 })
