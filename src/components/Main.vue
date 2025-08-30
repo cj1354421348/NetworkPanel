@@ -248,7 +248,7 @@ const props = defineProps({
 import { ElMessage } from 'element-plus'
 import nodesJson from "../assets/nodes.json"
 import { Link, Edit, Delete, CircleCheck, Loading, CopyDocument, TrendCharts, Hide, Histogram, Calendar,FullScreen } from '@element-plus/icons-vue'
-import { ref, watch,watchEffect, type Ref, reactive, nextTick } from 'vue' // 添加 nextTick
+import { ref, watch, watchEffect, type Ref, reactive, nextTick } from 'vue'
 import { toClipboard } from '@soerenmartius/vue3-clipboard'
 // import MarkUI from './Mark.vue'
 import FullScreenUI from './FullScreen.vue'
@@ -390,6 +390,14 @@ async function apiSolver(){
     solvedRunUrl = runUrl.value
     return
   }
+  
+  // 特殊处理项目服务器测速
+  if(runUrl.value === "NetworkPanelApi://self") {
+    // 使用当前部署的服务器地址进行测速
+    solvedRunUrl = window.location.origin + "/10mb_random";
+    return;
+  }
+  
   let host=runUrl.value.split("NetworkPanelApi://")[1]
   let resp:any = await fetch(import.meta.env.VITE_API_URL+"url.ajax?"+new URLSearchParams({host:host,cache:window.location.host}), {
       mode: "cors",
@@ -746,7 +754,7 @@ var isIOS = /iPhone|Macintosh/i.test(navigator.userAgent)
 const audioDom: Ref<any> = ref(null);
 
 
-import { onMounted, onUnmounted, nextTick, watch } from 'vue';
+import { onMounted, onUnmounted } from 'vue';
 import * as echarts from 'echarts';
 
 const chartContainer = ref(null);
