@@ -13,6 +13,6 @@
 		"Microsoft Akamai":"https://img-prod-cms-rt-microsoft-com.akamaized.net/cms/api/am/imageFileData/RW16Ptm"
 	},
 	"项目服务器": {
-		"部署服务器测速": "NetworkPanelApi://self"
+		"部署服务器测速": "NetworkPanelApi://self?t=now"
 	}
 }

@@ -2,25 +2,25 @@
     <div class="radius card" :style="{ borderRadius: `var(--el-border-radius-round)` }">
         <div style="text-align: center;">
             <transition name="el-fade-in">
-                <div v-if="ipInfo.local && ipInfo.local.country && ipInfo.local.country.code == 'CN'">
-                    <el-tooltip class="item" effect="dark" :content="ipInfo.local.ip" placement="top">
-                        <div @click.stop="onQuery(ipInfo.local.ip)">
-                            <el-tag style="width: 50px;" class="ml-2" type="success">{{
-                                ipInfo.layLocal?ipInfo.layLocal+"ms":"-ms" }}</el-tag>
-                            <el-text style="cursor: pointer;margin-left: 5px;white-space:nowrap;vertical-align: -1px;"
-                                class="font-background">{{ ipInfo.local.show.join(" ") }}</el-text>
-                        </div>
-                    </el-tooltip>
-                </div>
-            </transition>
-            <transition name="el-fade-in">
-                <div v-if="ipInfo.cloudflare && ipInfo.cloudflare.country && ipInfo.cloudflare.country.code != 'CN'">
+                <!-- 优先显示Cloudflare IP信息（包含延迟检测） -->
+                <div v-if="ipInfo.cloudflare && ipInfo.cloudflare.show && ipInfo.cloudflare.show.length > 0">
                     <el-tooltip class="item" effect="dark" :content="ipInfo.cloudflare.ip" placement="top">
                         <div @click.stop="onQuery(ipInfo.cloudflare.ip)">
                             <el-tag style="width: 50px;" class="ml-2" type="success">{{
                                 ipInfo.layCloudflare?ipInfo.layCloudflare+"ms":"-ms" }}</el-tag>
                             <el-text style="cursor: pointer;margin-left: 5px;white-space:nowrap;vertical-align: -1px;"
                                 class="font-background">{{ ipInfo.cloudflare.show.join(" ") }}</el-text>
+                        </div>
+                    </el-tooltip>
+                </div>
+                <!-- 如果没有Cloudflare IP信息，则显示本地IP信息 -->
+                <div v-else-if="ipInfo.local && ipInfo.local.show && ipInfo.local.show.length > 0">
+                    <el-tooltip class="item" effect="dark" :content="ipInfo.local.ip" placement="top">
+                        <div @click.stop="onQuery(ipInfo.local.ip)">
+                            <el-tag style="width: 50px;" class="ml-2" type="success">{{
+                                ipInfo.layLocal?ipInfo.layLocal+"ms":"-ms" }}</el-tag>
+                            <el-text style="cursor: pointer;margin-left: 5px;white-space:nowrap;vertical-align: -1px;"
+                                class="font-background">{{ ipInfo.local.show.join(" ") }}</el-text>
                         </div>
                     </el-tooltip>
                 </div>
@@ -85,7 +85,9 @@ const onQuery = async(ip:string) => {
         isQuerying.value = true;
         // 直接调用 queryIp 而不是 cachedQuery，因为我们是在手动查询，可能需要最新数据
         // ipRet.value = await cachedQuery(ip); 
-        ipRet.value = await queryIp(ip);
+        const result = await queryIp(ip);
+        // 设置结果，无论是否包含国家信息
+        ipRet.value = result;
         isQuerying.value = false;
     } catch (error) {
         isQuerying.value = false; // 确保在错误时也关闭 loading 状态
@@ -104,56 +106,170 @@ const copy = (ip: string) => {
 
 async function queryIp(ip: string) {
     try {
-        // 为了兼容性，我们使用一个免费的 IP 地理位置查询 API
-        // 通过本地代理 '/api/proxy' 请求 seeip.org
-        // 浏览器 -> Vite Server (/api/proxy/seeip-org-geoip/xxx) -> https://api.seeip.org/geoip/xxx
-        // console.log("Using seeip.org geoip API via proxy for IP:", ip);
-        const fallbackRsp = await fetch(`/api/proxy/seeip-org-geoip/${ip}`, {
-            method: "GET",
-            // mode: "cors", // 不再需要, 因为是同源请求
-            redirect: "follow",
-            referrerPolicy: "no-referrer"
-        });
-        
-        if (!fallbackRsp.ok) {
-            throw new Error(`seeip.org API request failed with status ${fallbackRsp.status}`);
-        }
-        
-        let resp = await fallbackRsp.json();
-        
-        // 适配 seeip.org /geoip 端点返回的数据结构
-        // 简化数据，只保留必要的字段
-        const adaptedData = {
-            ip: resp.ip || ip,
-            country: {
-                name: resp.country_name || '',
-                code: resp.country_code || ''
+        // 定义多个备选的 IP 查询服务（已按支持跨域排序）
+        const services = [
+            {
+                name: "ip-api.com",
+                url: `http://ip-api.com/json/${ip}`,
+                transform: (data: any) => ({
+                    ip: data.query || ip,
+                    country: {
+                        name: data.country || '',
+                        code: data.countryCode || ''
+                    }
+                })
             },
-            // 添加 show 字段，只显示 IP 和国家
-            show: [] 
-        };
-        
-        // 填充 show 字段
-        if (adaptedData.ip) {
-            adaptedData.show.push(adaptedData.ip);
+            {
+                name: "ipwho.is",
+                url: `https://ipwho.is/${ip}`,
+                transform: (data: any) => ({
+                    ip: data.ip || ip,
+                    country: {
+                        name: data.country || '',
+                        code: data.country_code || ''
+                    }
+                })
+            },
+            {
+                name: "ipinfo.io",
+                url: `https://ipinfo.io/${ip}/json`,
+                transform: (data: any) => {
+                    const [countryName, countryCode] = data.country ? [data.country, data.country] : ['', ''];
+                    return {
+                        ip: data.ip || ip,
+                        country: {
+                            name: countryName,
+                            code: countryCode
+                        }
+                    };
+                }
+            }
+        ];
+
+        // 尝试每个服务
+        for (const service of services) {
+            try {
+                console.log(`Trying ${service.name} for IP: ${ip}`);
+                const rsp = await fetch(service.url, {
+                    method: "GET",
+                    redirect: "follow",
+                    referrerPolicy: "no-referrer"
+                });
+                
+                if (!rsp.ok) {
+                    throw new Error(`${service.name} API request failed with status ${rsp.status}`);
+                }
+                
+                let resp = await rsp.json();
+                
+                // 检查是否有错误
+                if (resp.error || resp.status === "fail") {
+                    throw new Error(`${service.name} API error: ${resp.reason || resp.message || 'Unknown error'}`);
+                }
+                
+                // 转换数据格式
+                const transformedData = service.transform(resp);
+                
+                // 构建返回数据
+                const adaptedData: { 
+                    ip: string; 
+                    country: { name: string; code: string }; 
+                    show: string[] 
+                } = {
+                    ip: transformedData.ip,
+                    country: transformedData.country,
+                    // 添加 show 字段，只显示 IP 和国家
+                    show: []
+                };
+                
+                // 填充 show 字段
+                if (adaptedData.ip) {
+                    adaptedData.show.push(adaptedData.ip);
+                }
+                // 确保 country 对象存在且 name 非空
+                if (adaptedData.country && adaptedData.country.name) {
+                    adaptedData.show.push(adaptedData.country.name);
+                }
+                // 如果 country.name 为空，但 code 存在，也可以显示 code
+                else if (adaptedData.country && adaptedData.country.code) {
+                    adaptedData.show.push(`(${adaptedData.country.code})`);
+                }
+                
+                console.log(`IP query result from ${service.name}:`, adaptedData);
+                return adaptedData;
+            } catch (error: any) {
+                console.warn(`Failed to query ${service.name}:`, error);
+                // 继续尝试下一个服务
+            }
         }
-        // 确保 country 对象存在且 name 非空
-        if (adaptedData.country && adaptedData.country.name) {
-            adaptedData.show.push(adaptedData.country.name);
-        }
-        // 如果 country.name 为空，但 code 存在，也可以显示 code
-        else if (adaptedData.country && adaptedData.country.code) {
-             adaptedData.show.push(`(${adaptedData.country.code})`);
-        }
         
-        return adaptedData;
-        
-    } catch (error) {
+        // 如果所有外部服务都失败，尝试使用本地代理
+        try {
+            console.log("Trying local proxy for IP:", ip);
+            const fallbackRsp = await fetch(`/api/proxy/seeip-org-geoip/${ip}`, {
+                method: "GET",
+                redirect: "follow",
+                referrerPolicy: "no-referrer"
+            });
+            
+            if (!fallbackRsp.ok) {
+                // 如果代理请求失败，至少返回 IP 地址
+                console.warn(`Local proxy request failed with status ${fallbackRsp.status}, returning IP only`);
+                return {
+                    ip: ip,
+                    show: [ip],
+                    country: { code: '', name: '' }
+                };
+            }
+            
+            let resp = await fallbackRsp.json();
+            
+            // 适配 seeip.org /geoip 端点返回的数据结构
+            const adaptedData: { 
+                ip: string; 
+                country: { name: string; code: string }; 
+                show: string[] 
+            } = {
+                ip: resp.ip || ip,
+                country: {
+                    name: resp.country_name || '',
+                    code: resp.country_code || ''
+                },
+                // 添加 show 字段，只显示 IP 和国家
+                show: []
+            };
+            
+            // 填充 show 字段
+            if (adaptedData.ip) {
+                adaptedData.show.push(adaptedData.ip);
+            }
+            // 确保 country 对象存在且 name 非空
+            if (adaptedData.country && adaptedData.country.name) {
+                adaptedData.show.push(adaptedData.country.name);
+            }
+            // 如果 country.name 为空，但 code 存在，也可以显示 code
+            else if (adaptedData.country && adaptedData.country.code) {
+                 adaptedData.show.push(`(${adaptedData.country.code})`);
+            }
+            
+            console.log("IP query result from local proxy:", adaptedData);
+            return adaptedData;
+            
+        } catch (fallbackError: any) {
+            console.error("All IP query methods failed:", fallbackError);
+            // 如果所有方法都失败，至少返回 IP 地址
+            return {
+                ip: ip,
+                show: [ip],
+                country: { code: '', name: '' }
+            };
+        }
+    } catch (error: any) {
         console.error("IP query failed for:", ip, error);
-        // 如果所有方法都失败，返回一个包含错误信息的对象
+        // 如果所有方法都失败，至少返回 IP 地址
         return {
             ip: ip,
-            show: [`Error: ${error.message}`],
+            show: [ip],
             country: { code: '', name: '' }
         };
     }
@@ -174,7 +290,7 @@ async function cachedQuery(ip: string) {
             console.error("cachedQuery failed for IP:", ip, error);
             failureRef.value = true; // 设置响应式的 failure 状态
             // 抛出一个更具体的错误信息
-            throw new Error("查询IP信息失败: " + (error.message || error)); 
+            throw new Error("查询IP信息失败: " + ((error as Error).message || String(error))); 
         }
         ret['time'] = new Date().getTime() / 1000
         localStorage.setItem("cache_ip_"+ip, JSON.stringify(ret))
@@ -189,21 +305,27 @@ async function handleIP(ip: string) {
         // 确保 info 是一个对象
         if (typeof info !== 'object' || info === null) {
             console.error("handleIP: queryIp did not return a valid object for IP:", ip, info);
-            return { show: [`Error: Invalid data for ${ip}`], ip: ip, country: { name: '', code: '' } };
+            return { show: [ip], ip: ip, country: { name: '', code: '' } };
         }
         
         // 确保 country 对象存在
-                if (!info.country) {
-                    info.country = { name: '', code: '' };
-                }
-                // 如果 queryIp 已经正确设置了 show 字段（只包含 IP 和国家），则直接返回
-                // 不再需要额外的处理
-                
-                return info;
+        if (!info.country) {
+            info.country = { name: '', code: '' };
+        }
+        // 确保 show 数组存在
+        if (!info.show) {
+            info.show = [ip];
+        }
+        // 如果 show 数组为空，至少包含 IP 地址
+        if (info.show.length === 0) {
+            info.show.push(ip);
+        }
+        
+        return info;
     } catch (error) {
-        console.error("handleIP failed for IP:", ip, error.message);
-        // 返回一个包含错误信息的对象
-        return { show: [`Error: ${error.message}`], ip: ip }; 
+        console.error("handleIP failed for IP:", ip, (error as Error).message);
+        // 返回一个只包含 IP 地址的对象
+        return { show: [ip], ip: ip, country: { name: '', code: '' } };
     }
 }
 
@@ -232,7 +354,7 @@ async function handleIP(ip: string) {
             if (localIp) {
                 // 注意：这里直接调用 queryIp，避免缓存可能带来的问题
                 const localIpInfo = await queryIp(localIp);
-                // 只有在成功获取信息后才更新 reactive 对象
+                // 更新 reactive 对象，即使只包含 IP 地址
                 if (localIpInfo && localIpInfo.ip) {
                     ipInfo.local = localIpInfo;
                 }
@@ -262,7 +384,7 @@ const watchCloudflare = async(host: string) => {
                 // 2. 使用获取到的 IP 调用我们新的 queryIp 函数
                 // queryIp 内部也会通过代理请求 seeip.org
                 const cfIpInfo = await queryIp(cfIp); 
-                // 只有在成功获取信息后才更新 reactive 对象
+                // 更新 reactive 对象，即使只包含 IP 地址
                 if (cfIpInfo && cfIpInfo.ip) {
                      ipInfo.cloudflare = cfIpInfo; 
                      ipInfo.layCloudflare = lay;

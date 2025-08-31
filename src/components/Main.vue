@@ -392,9 +392,9 @@ async function apiSolver(){
   }
   
   // 特殊处理项目服务器测速
-  if(runUrl.value === "NetworkPanelApi://self") {
+  if(runUrl.value.startsWith("NetworkPanelApi://self")) {
     // 使用当前部署的服务器地址进行测速
-    solvedRunUrl = window.location.origin + "/10mb_random";
+    solvedRunUrl = window.location.origin + "/10mb_random?" + new Date().getTime();
     return;
   }
   
